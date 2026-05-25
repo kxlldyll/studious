@@ -147,7 +147,8 @@ RunService.RenderStepped:Connect(function()
                 if not espObjects[entity] then
                     espObjects[entity] = { 
                         Tracer = Drawing.new("Line"),
-                        NameText = Drawing.new("Text")
+                        NameText = Drawing.new("Text"),
+                        DistText = Drawing.new("Text")
                     }
                 end
                 
@@ -160,17 +161,31 @@ RunService.RenderStepped:Connect(function()
                 esp.Tracer.Thickness = 1.5
                 esp.Tracer.Transparency = 0.7
                 
+                local distanceValue = 0
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    distanceValue = (LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude
+                end
+                
                 esp.NameText.Visible = true
                 esp.NameText.Text = playerObj.Name
-                esp.NameText.Position = Vector2.new(headPos.X, headPos.Y - 20)
+                esp.NameText.Position = Vector2.new(headPos.X, headPos.Y - 24)
                 esp.NameText.Color = Color3.fromRGB(255, 255, 255)
-                esp.NameText.Size = 14
+                esp.NameText.Size = 13
                 esp.NameText.Center = true
                 esp.NameText.Outline = true
+                
+                esp.DistText.Visible = true
+                esp.DistText.Text = string.format("%.0f Studs", distanceValue)
+                esp.DistText.Position = Vector2.new(headPos.X, headPos.Y - 10)
+                esp.DistText.Color = Color3.fromRGB(0, 255, 255)
+                esp.DistText.Size = 11
+                esp.DistText.Center = true
+                esp.DistText.Outline = true
             else
                 if espObjects[entity] then
                     espObjects[entity].Tracer.Visible = false
                     espObjects[entity].NameText.Visible = false
+                    espObjects[entity].DistText.Visible = false
                 end
             end
         end
@@ -181,6 +196,7 @@ RunService.RenderStepped:Connect(function()
         if not char or not entity.Parent then
             esp.Tracer:Remove()
             esp.NameText:Remove()
+            esp.DistText:Remove()
             espObjects[entity] = nil
         end
     end
