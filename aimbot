@@ -1,0 +1,126 @@
+local UIS = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local isAiming = false
+local espObjects = {} -- Keeps track of tracer lines smoothly
+
+-- Helper function to safely create Drawing elements for a player
+local function createESP(player)
+    if espObjects[player] then return end
+    
+    espObjects[player] = {
+        Tracer = Drawing.new("Line") -- Only keeping the tracer line node
+    }
+end
+
+-- Helper function to remove Drawing elements when someone leaves or dies
+local function removeESP(player)
+    if espObjects[player] then
+        for _, object in pairs(espObjects[player]) do
+            object:Remove()
+        end
+        espObjects[player] = nil
+    end
+end
+
+-- Target Finder: Measures pixel distance from your screen center
+function getClosestToCrosshair()
+    local closestDistance = math.huge
+    local closestPlayer = nil
+    
+    local viewportSize = Camera.ViewportSize
+    local screenCenter = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    
+    for _, v in pairs(Players:GetChildren()) do
+        if v ~= LocalPlayer and v.Team ~= LocalPlayer.Team then
+            if LocalPlayer.Character and v.Character and v.Character:FindFirstChild("Head") and v.Character:FindFirstChild("Humanoid") and v.Character:FindFirstChild("HumanoidRootPart") then
+                -- Safety Net: Skip dead players or ragdolls
+                if v.Character.Humanoid.Health > 0 then
+                    
+                    -- Convert 3D player position to 2D monitor pixels
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(v.Character.Head.Position)
+                    
+                    -- Only lock on if they are actually visible on your screen
+                    if onScreen then
+                        local enemyScreenVector = Vector2.new(screenPos.X, screenPos.Y)
+                        local distanceFromCenter = (screenCenter - enemyScreenVector).magnitude
+                        
+                        if distanceFromCenter < closestDistance then
+                            closestDistance = distanceFromCenter
+                            closestPlayer = v
+                        end
+                    end
+                    
+                end
+            end 
+        end
+    end
+    return closestPlayer
+end
+
+-- Right-Click Press Handler
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = true
+    end
+end)
+
+-- Right-Click Release Handler
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = false
+    end
+end)
+
+-- Clean up drawing objects if players leave the game entirely
+Players.PlayerRemoving:Connect(removeESP)
+
+-- Fast execution frame loop (Handles Aimbot AND Clean Tracer-Only ESP)
+RunService.RenderStepped:Connect(function()
+    -- 🎯 SECTION 1: THE AIMBOT TRACKER
+    if isAiming then
+        local target = getClosestToCrosshair()
+        if target and target.Character and target.Character:FindFirstChild("Head") then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Character.Head.Position)
+        end
+    end
+    
+    -- 👁️ SECTION 2: THE TRACER-ONLY ESP
+    local viewportSize = Camera.ViewportSize
+    local screenBottom = Vector2.new(viewportSize.X / 2, viewportSize.Y) -- Tracers snap to bottom center of screen
+    
+    for _, v in pairs(Players:GetChildren()) do
+        if v ~= LocalPlayer and v.Team ~= LocalPlayer.Team then
+            if v.Character and v.Character:FindFirstChild("HumanoidRootPart") and v.Character:FindFirstChild("Humanoid") and v.Character:FindFirstChild("Head") and v.Character.Humanoid.Health > 0 then
+                
+                local hrpPos, onScreen = Camera:WorldToViewportPoint(v.Character.HumanoidRootPart.Position)
+                
+                if onScreen then
+                    createESP(v)
+                    local esp = espObjects[v]
+                    
+                    -- 1. Draw Tracer Line Only
+                    esp.Tracer.Visible = true
+                    esp.Tracer.From = screenBottom
+                    esp.Tracer.To = Vector2.new(hrpPos.X, hrpPos.Y)
+                    esp.Tracer.Color = Color3.fromRGB(255, 0, 0) -- Crimson lines
+                    esp.Tracer.Thickness = 1.5
+                    esp.Tracer.Transparency = 0.7
+                    
+                    -- All health bar rendering and outline logic completely removed!
+                else
+                    removeESP(v)
+                end
+            else
+                removeESP(v)
+            end
+        else
+            removeESP(v)
+        end
+    end
+end)
