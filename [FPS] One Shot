@@ -8,21 +8,40 @@ local Camera = workspace.CurrentCamera
 local isAiming = false
 local espObjects = {}
 
-local function getRealPlayerCharacter(model)
-    if not model or not model:IsA("Model") then return nil end
-    if model == LocalPlayer.Character or model:IsAncestorOf(LocalPlayer.Character) then 
-        return nil 
-    end
-    
-    local humanPlayer = Players:GetPlayerFromCharacter(model)
-    if humanPlayer and humanPlayer ~= LocalPlayer then
-        if model:FindFirstChild("Humanoid") and model.Humanoid.Health > 0 then
-            if model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildOfClass("BasePart") then
-                return humanPlayer, model
+-- Safely cleans up and deletes Drawing instances from memory
+local function cleanupESP(entity)
+    if espObjects[entity] then
+        for _, drawingObj in pairs(espObjects[entity]) do
+            if drawingObj and drawingObj.Remove then
+                drawingObj:Remove()
             end
         end
+        espObjects[entity] = nil
     end
-    return nil
+end
+
+local function getRealPlayerCharacter(model)
+    if not model or not model:IsA("Model") then return nil, nil, nil end
+    if model == LocalPlayer.Character or model:IsAncestorOf(LocalPlayer.Character) then 
+        return nil, nil, nil 
+    end
+    
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildOfClass("BasePart")
+    
+    if humanoid and humanoid.Health > 0 and hrp then
+        local humanPlayer = Players:GetPlayerFromCharacter(model)
+        
+        if humanPlayer then
+            if humanPlayer ~= LocalPlayer then
+                return humanPlayer, model, "PLAYER"
+            end
+        else
+            return nil, model, "NPC" 
+        end
+    end
+    
+    return nil, nil, nil
 end
 
 local function getTargetBone(char)
@@ -61,7 +80,7 @@ function getClosestRealPlayerToCrosshair()
     local candidates = {}
     
     for _, obj in pairs(workspace:GetDescendants()) do
-        local p, char = getRealPlayerCharacter(obj)
+        local p, char, entityType = getRealPlayerCharacter(obj)
         if char then
             table.insert(candidates, char)
         end
@@ -125,28 +144,32 @@ RunService.RenderStepped:Connect(function()
     local screenBottom = Vector2.new(viewportSize.X / 2, viewportSize.Y)
     
     local activeTargets = {}
+    local validEntitiesThisFrame = {}
     
+    -- Gather and map currently existing active entities
     for _, obj in pairs(workspace:GetDescendants()) do
-        local p, char = getRealPlayerCharacter(obj)
+        local p, char, entityType = getRealPlayerCharacter(obj)
         if char then
-            table.insert(activeTargets, {player = p, character = char})
+            table.insert(activeTargets, {player = p, character = char, type = entityType})
+            validEntitiesThisFrame[char] = true
         end
     end
     
     for _, data in pairs(activeTargets) do
         local entity = data.character
         local playerObj = data.player
+        local entityType = data.type
         local hrp = entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChildOfClass("BasePart")
         local head = getTargetBone(entity)
         
         if hrp and head then
             local hrpPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-            local headPos = Camera:WorldToViewportPoint(head.Position)
             
             if onScreen then
                 if not espObjects[entity] then
                     espObjects[entity] = { 
                         Tracer = Drawing.new("Line"),
+                        Box = Drawing.new("Square"),
                         NameText = Drawing.new("Text"),
                         DistText = Drawing.new("Text")
                     }
@@ -154,10 +177,26 @@ RunService.RenderStepped:Connect(function()
                 
                 local esp = espObjects[entity]
                 
+                local topPosition = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3, 0))
+                local bottomPosition = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.5, 0))
+                
+                local boxHeight = math.abs(topPosition.Y - bottomPosition.Y)
+                local boxWidth = boxHeight / 1.8
+                
+                local displayColor = (entityType == "NPC") and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 0, 0)
+                
+                esp.Box.Visible = true
+                esp.Box.Size = Vector2.new(boxWidth, boxHeight)
+                esp.Box.Position = Vector2.new(hrpPos.X - (boxWidth / 2), hrpPos.Y - (boxHeight / 2))
+                esp.Box.Color = displayColor
+                esp.Box.Thickness = 1.5
+                esp.Box.Filled = false
+                esp.Box.Transparency = 0.8
+                
                 esp.Tracer.Visible = true
                 esp.Tracer.From = screenBottom
                 esp.Tracer.To = Vector2.new(hrpPos.X, hrpPos.Y)
-                esp.Tracer.Color = Color3.fromRGB(255, 0, 0)
+                esp.Tracer.Color = displayColor
                 esp.Tracer.Thickness = 1.5
                 esp.Tracer.Transparency = 0.7
                 
@@ -166,9 +205,11 @@ RunService.RenderStepped:Connect(function()
                     distanceValue = (LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude
                 end
                 
+                local nameString = (entityType == "NPC") and ("[NPC] " .. entity.Name) or ("[PLAYER] " .. playerObj.Name)
+                
                 esp.NameText.Visible = true
-                esp.NameText.Text = playerObj.Name
-                esp.NameText.Position = Vector2.new(headPos.X, headPos.Y - 24)
+                esp.NameText.Text = nameString
+                esp.NameText.Position = Vector2.new(hrpPos.X, hrpPos.Y - (boxHeight / 2) - 24)
                 esp.NameText.Color = Color3.fromRGB(255, 255, 255)
                 esp.NameText.Size = 13
                 esp.NameText.Center = true
@@ -176,13 +217,14 @@ RunService.RenderStepped:Connect(function()
                 
                 esp.DistText.Visible = true
                 esp.DistText.Text = string.format("%.0f Studs", distanceValue)
-                esp.DistText.Position = Vector2.new(headPos.X, headPos.Y - 10)
+                esp.DistText.Position = Vector2.new(hrpPos.X, hrpPos.Y - (boxHeight / 2) - 11)
                 esp.DistText.Color = Color3.fromRGB(0, 255, 255)
                 esp.DistText.Size = 11
                 esp.DistText.Center = true
                 esp.DistText.Outline = true
             else
                 if espObjects[entity] then
+                    espObjects[entity].Box.Visible = false
                     espObjects[entity].Tracer.Visible = false
                     espObjects[entity].NameText.Visible = false
                     espObjects[entity].DistText.Visible = false
@@ -191,13 +233,10 @@ RunService.RenderStepped:Connect(function()
         end
     end
     
-    for entity, esp in pairs(espObjects) do
-        local p, char = getRealPlayerCharacter(entity)
-        if not char or not entity.Parent then
-            esp.Tracer:Remove()
-            esp.NameText:Remove()
-            esp.DistText:Remove()
-            espObjects[entity] = nil
+    -- Strictly destroy and clear any drawings that don't match alive, valid game objects
+    for entity, _ in pairs(espObjects) do
+        if not validEntitiesThisFrame[entity] or not entity.Parent then
+            cleanupESP(entity)
         end
     end
 end)
