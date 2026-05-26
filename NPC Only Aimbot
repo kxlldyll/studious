@@ -1,0 +1,242 @@
+local UIS = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local isAiming = false
+local espObjects = {}
+
+-- Safely cleans up and deletes Drawing instances from memory
+local function cleanupESP(entity)
+    if espObjects[entity] then
+        for _, drawingObj in pairs(espObjects[entity]) do
+            if drawingObj and drawingObj.Remove then
+                drawingObj:Remove()
+            end
+        end
+        espObjects[entity] = nil
+    end
+end
+
+-- REMODEL: Strict NPC checker (returns nil for any real human players)
+local function getRealPlayerCharacter(model)
+    if not model or not model:IsA("Model") then return nil, nil, nil end
+    if model == LocalPlayer.Character or model:IsAncestorOf(LocalPlayer.Character) then 
+        return nil, nil, nil 
+    end
+    
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildOfClass("BasePart")
+    
+    if humanoid and hrp then
+        local humanPlayer = Players:GetPlayerFromCharacter(model)
+        
+        -- If no real player is linked, it's a valid bot/NPC target!
+        if not humanPlayer then
+            return nil, model, "NPC" 
+        end
+    end
+    
+    return nil, nil, nil
+end
+
+local function getTargetBone(char)
+    if not char then return nil end
+    if char:FindFirstChild("Head") and char.Head:IsA("BasePart") then
+        return char.Head
+    end
+    for _, part in pairs(char:GetChildren()) do
+        if part:IsA("BasePart") and part.Name:lower():find("head") then
+            return part
+        end
+    end
+    return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildOfClass("BasePart")
+end
+
+local function isVisible(targetPos, targetChar)
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then return false end
+    
+    local origin = Camera.CFrame.Position
+    local direction = (targetPos - origin).Unit * (targetPos - origin).Magnitude
+    local ray = Ray.new(origin, direction)
+    
+    local ignoreList = {LocalPlayer.Character, targetChar, Camera}
+    local hitPart = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    
+    return hitPart == nil
+end
+
+function getClosestRealPlayerToCrosshair()
+    local closestDistance = math.huge
+    local closestEntity = nil
+    
+    local viewportSize = Camera.ViewportSize
+    local screenCenter = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    
+    local candidates = {}
+    
+    for _, obj in pairs(workspace:GetDescendants()) do
+        local p, char, entityType = getRealPlayerCharacter(obj)
+        if char and entityType == "NPC" then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                table.insert(candidates, char)
+            end
+        end
+    end
+    
+    for _, entity in pairs(candidates) do
+        local targetPart = getTargetBone(entity)
+        if targetPart then
+            local targetPos = targetPart.Position
+            if targetPart.Name == "HumanoidRootPart" then
+                targetPos = targetPos + Vector3.new(0, 2.2, 0)
+            end
+            
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
+            if onScreen then
+                if isVisible(targetPos, entity) then
+                    local screenVector = Vector2.new(screenPos.X, screenPos.Y)
+                    local distance = (screenCenter - screenVector).magnitude
+                    
+                    if distance < closestDistance then
+                        closestDistance = distance
+                        closestEntity = entity
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestEntity
+end
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = true
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = false
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if isAiming then
+        local targetEntity = getClosestRealPlayerToCrosshair()
+        if targetEntity then
+            local targetPart = getTargetBone(targetEntity)
+            if targetPart then
+                local targetPos = targetPart.Position
+                if targetPart.Name == "HumanoidRootPart" then
+                    targetPos = targetPos + Vector3.new(0, 2.2, 0)
+                end
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+            end
+        end
+    end
+    
+    local viewportSize = Camera.ViewportSize
+    local screenBottom = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+    
+    local activeTargets = {}
+    local validEntitiesThisFrame = {}
+    
+    -- Gather and map currently existing active entities
+    for _, obj in pairs(workspace:GetDescendants()) do
+        local p, char, entityType = getRealPlayerCharacter(obj)
+        if char and entityType == "NPC" then
+            table.insert(activeTargets, {player = p, character = char, type = entityType})
+            validEntitiesThisFrame[char] = true
+        end
+    end
+    
+    for _, data in pairs(activeTargets) do
+        local entity = data.character
+        local entityType = data.type
+        local hrp = entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChildOfClass("BasePart")
+        local head = getTargetBone(entity)
+        
+        if hrp and head then
+            local hrpPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+            
+            if onScreen then
+                if not espObjects[entity] then
+                    espObjects[entity] = { 
+                        Tracer = Drawing.new("Line"),
+                        Box = Drawing.new("Square"),
+                        NameText = Drawing.new("Text"),
+                        DistText = Drawing.new("Text")
+                    }
+                end
+                
+                local esp = espObjects[entity]
+                
+                local topPosition = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3, 0))
+                local bottomPosition = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.5, 0))
+                
+                local boxHeight = math.abs(topPosition.Y - bottomPosition.Y)
+                local boxWidth = boxHeight / 1.8
+                
+                -- Uniform Theme Color: Strictly your preferred Neon Violet
+                local displayColor = Color3.fromRGB(186, 85, 211)
+                
+                esp.Box.Visible = true
+                esp.Box.Size = Vector2.new(boxWidth, boxHeight)
+                esp.Box.Position = Vector2.new(hrpPos.X - (boxWidth / 2), hrpPos.Y - (boxHeight / 2))
+                esp.Box.Color = displayColor
+                esp.Box.Thickness = 1.5
+                esp.Box.Filled = false
+                esp.Box.Transparency = 0.8
+                
+                esp.Tracer.Visible = true
+                esp.Tracer.From = screenBottom
+                esp.Tracer.To = Vector2.new(hrpPos.X, hrpPos.Y)
+                esp.Tracer.Color = displayColor
+                esp.Tracer.Thickness = 1.5
+                esp.Tracer.Transparency = 0.7
+                
+                local distanceValue = 0
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    distanceValue = (LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude
+                end
+                
+                local nameString = "[NPC] " .. entity.Name
+                
+                esp.NameText.Visible = true
+                esp.NameText.Text = nameString
+                esp.NameText.Position = Vector2.new(hrpPos.X, hrpPos.Y - (boxHeight / 2) - 24)
+                esp.NameText.Color = Color3.fromRGB(255, 255, 255)
+                esp.NameText.Size = 13
+                esp.NameText.Center = true
+                esp.NameText.Outline = true
+                
+                esp.DistText.Visible = true
+                esp.DistText.Text = string.format("%.0f Studs", distanceValue)
+                esp.DistText.Position = Vector2.new(hrpPos.X, hrpPos.Y - (boxHeight / 2) - 11)
+                esp.DistText.Color = Color3.fromRGB(0, 255, 255)
+                esp.DistText.Size = 11
+                esp.DistText.Center = true
+                esp.DistText.Outline = true
+            else
+                if espObjects[entity] then
+                    espObjects[entity].Box.Visible = false
+                    espObjects[entity].Tracer.Visible = false
+                    espObjects[entity].NameText.Visible = false
+                    espObjects[entity].DistText.Visible = false
+                end
+            end
+        end
+    end
+    
+    for entity, _ in pairs(espObjects) do
+        if not validEntitiesThisFrame[entity] or not entity.Parent then
+            cleanupESP(entity)
+        end
+    end
+end)
