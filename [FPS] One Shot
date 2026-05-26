@@ -183,7 +183,8 @@ RunService.RenderStepped:Connect(function()
                 local boxHeight = math.abs(topPosition.Y - bottomPosition.Y)
                 local boxWidth = boxHeight / 1.8
                 
-                local displayColor = (entityType == "NPC") and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 0, 0)
+                -- Dynamic Colors: Neon Violet for NPCs/Bots, Red for Players
+                local displayColor = (entityType == "NPC") and Color3.fromRGB(186, 85, 211) or Color3.fromRGB(255, 0, 0)
                 
                 esp.Box.Visible = true
                 esp.Box.Size = Vector2.new(boxWidth, boxHeight)
