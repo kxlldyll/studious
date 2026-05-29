@@ -1,0 +1,5 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() - Infintite Yield 
+loadstring(game:HttpGet("https://raw.githubusercontent.com/rjsjzbtcy2-cmd/studious/refs/heads/main/Team%20Vs%20Team%20Aimbot"))() - Arsenal
+loadstring(game:HttpGet("https://raw.githubusercontent.com/0vma/strelizia/refs/heads/main/loader.luau", true))() - strelizia
+loadstring(game:HttpsGet("https://raw.githubusercontent.com/rjsjzbtcy2-cmd/studious/refs/heads/main/NPC%20Only%20Aimbot"))() - Player vs Bot
+loadstring(game:HttpGet("https://raw.githubusercontent.com/rjsjzbtcy2-cmd/studious/refs/heads/main/FFA%20Only"))() - Free 4 all
